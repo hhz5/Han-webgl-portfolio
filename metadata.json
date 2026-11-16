@@ -1,0 +1,6 @@
+{
+  "name": "Bruno's 3D Interactive World",
+  "description": "A procedural Three.js 3D interactive portfolio world inspired by bruno-simon.com with drivable off-road vehicle, golden-hour atmosphere, and modular 3D landmark components.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
