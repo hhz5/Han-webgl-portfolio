@@ -1,7 +1,13 @@
 {
-  "name": "react-example",
+  "name": "han-webgl-portfolio",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "韩鸿哲 · AI 产品总监 3D 交互式简历与后台管理系统 (Procedural Three.js WebGL Portfolio)",
+  "homepage": "https://github.com/hhz5/Han-webgl-portfolio#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hhz5/Han-webgl-portfolio.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",

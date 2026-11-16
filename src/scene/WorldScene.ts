@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import type { ResumeModuleId, ResumeSiteConfig } from '../data/resumeConfig';
 import { createProceduralTexturePack } from './materials/proceduralTextures';
 import { createSkyAtmosphere } from './components/SkyAtmosphere';
 import { createTerrainAndWater } from './components/TerrainWater';
@@ -10,20 +11,17 @@ import { createOffroadTruck } from './components/OffroadTruck';
 import { createProjectsZone } from './components/ProjectsZone';
 import { createLabZone } from './components/LabZone';
 import { createCareerZone } from './components/CareerZone';
-import { createCircuitZone } from './components/CircuitZone';
-import { createBowlingZone } from './components/BowlingZone';
 import { createAltarAndWaterfall } from './components/AltarWaterfallZone';
-import { createPlaygroundProps, type WhisperFlag } from './components/PlaygroundProps';
+import { createContactImpactZone } from './components/ContactImpactZone';
+import { createPlaygroundProps } from './components/PlaygroundProps';
 import {
   createInitialVehicleState,
   findNearestZone,
   groundHeightAt,
   resolveDynamicBodyCollision,
   stepVehiclePhysics,
-  updateCircuitProgress,
   WORLD_ZONES,
   type AtmospherePresetId,
-  type CircuitState,
   type VehicleInput,
   type VehicleState,
   type WorldZoneDef,
@@ -32,42 +30,30 @@ import {
 export interface WorldHudSnapshot {
   speedKmh: number;
   distanceMeters: number;
-  cookiesCollected: number;
-  totalCookies: number;
-  pinsKnocked: number;
   nearestZone: WorldZoneDef;
   insideZone: boolean;
   truckX: number;
   truckZ: number;
   truckHeading: number;
-  circuit: CircuitState;
-  unlockedAchievements: string[];
 }
 
 export interface WorldSceneCallbacks {
   onProgress: (percent: number, stageLabel: string) => void;
   onReady: () => void;
   onHudUpdate: (snapshot: WorldHudSnapshot) => void;
-  onZoneInteract: (zoneId: WorldZoneDef['id']) => void;
+  onZoneInteract: (zoneId: ResumeModuleId) => void;
 }
 
 export interface WorldSceneHandle {
   setAtmosphere: (preset: AtmospherePresetId) => void;
   setCameraMode: (mode: 'follow' | 'free') => void;
-  teleportToZone: (zoneId: WorldZoneDef['id']) => void;
+  teleportToZone: (zoneId: ResumeModuleId) => void;
   respawnTruck: () => void;
   resetProps: () => void;
-  plantWhisper: (author: string, message: string) => void;
-  setTouchInput: (patch: Partial<VehicleInput>) => void;
+  applyConfig: (config: ResumeSiteConfig) => void;
   honk: () => void;
   dispose: () => void;
 }
-
-export const INITIAL_WHISPERS: WhisperFlag[] = [
-  { id: 'w1', author: 'Bruno', message: 'Welcome to my 3D world!', x: 3.5, z: 7.2, color: '#d43545' },
-  { id: 'w2', author: 'Lin', message: 'Love the golden sunset!', x: 16, z: -8, color: '#7c3aed' },
-  { id: 'w3', author: 'Alex', message: 'Strike at the bowling!', x: -9, z: -26, color: '#ea580c' },
-];
 
 const _prevTarget = new THREE.Vector3();
 const _desiredTarget = new THREE.Vector3();
@@ -88,8 +74,20 @@ function detectSoftwareGl(): boolean {
   }
 }
 
+function disposeObjectTree(obj: THREE.Object3D): void {
+  obj.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      mesh.geometry?.dispose();
+      if (Array.isArray(mesh.material)) mesh.material.forEach((m) => m.dispose());
+      else mesh.material?.dispose();
+    }
+  });
+}
+
 export function mountWorldScene(
   container: HTMLElement,
+  initialConfig: ResumeSiteConfig,
   callbacks: WorldSceneCallbacks,
   instantStart = false
 ): WorldSceneHandle {
@@ -103,7 +101,10 @@ export function mountWorldScene(
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
   renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
+  renderer.setSize(
+    container.clientWidth || window.innerWidth,
+    container.clientHeight || window.innerHeight
+  );
   renderer.shadowMap.enabled = !isSoftwareGl;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.domElement.style.display = 'block';
@@ -116,7 +117,7 @@ export function mountWorldScene(
   const width = container.clientWidth || window.innerWidth;
   const height = container.clientHeight || window.innerHeight;
   const camera = new THREE.PerspectiveCamera(48, width / height, 0.4, 340);
-  camera.position.set(11, 7.8, 15.5);
+  camera.position.set(12.5, 8.6, 18.3);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = !isSoftwareGl;
@@ -125,27 +126,17 @@ export function mountWorldScene(
   controls.enableZoom = true;
   controls.enablePan = false;
   controls.minDistance = 6;
-  controls.maxDistance = 45;
+  controls.maxDistance = 48;
   controls.minPolarAngle = 0.2;
   controls.maxPolarAngle = Math.PI * 0.46;
   controls.target.set(0, 1.1, 2.5);
   controls.update();
 
+  let currentConfig = initialConfig;
   let cameraMode: 'follow' | 'free' = 'follow';
   let disposed = false;
   let frameId = 0;
   let vehicleState: VehicleState = createInitialVehicleState();
-  let circuitState: CircuitState = {
-    running: false,
-    nextCheckpoint: 0,
-    elapsedMs: 0,
-    bestLapMs: null,
-    lapsCompleted: 0,
-  };
-
-  let cookiesCollected = 0;
-  const achievements = new Set<string>();
-  const visitedZones = new Set<string>(['landing']);
 
   const keyInput: VehicleInput = {
     forward: false,
@@ -157,28 +148,83 @@ export function mountWorldScene(
     jump: false,
   };
 
-  const touchInput: VehicleInput = {
-    forward: false,
-    backward: false,
-    left: false,
-    right: false,
-    boost: false,
-    brake: false,
-    jump: false,
-  };
-
-  // Mutable component handles populated during progressive async setup
   let atmosphere: ReturnType<typeof createSkyAtmosphere> | null = null;
   let textures: ReturnType<typeof createProceduralTexturePack> | null = null;
   let terrainWater: ReturnType<typeof createTerrainAndWater> | null = null;
   let truck: ReturnType<typeof createOffroadTruck> | null = null;
   let projectsZone: ReturnType<typeof createProjectsZone> | null = null;
+  let careerZone: ReturnType<typeof createCareerZone> | null = null;
   let labZone: ReturnType<typeof createLabZone> | null = null;
-  let circuitZone: ReturnType<typeof createCircuitZone> | null = null;
-  let bowlingZone: ReturnType<typeof createBowlingZone> | null = null;
-  let altarZone: ReturnType<typeof createAltarAndWaterfall> | null = null;
+  let educationZone: ReturnType<typeof createAltarAndWaterfall> | null = null;
+  let contactZone: ReturnType<typeof createContactImpactZone> | null = null;
   let propsZone: ReturnType<typeof createPlaygroundProps> | null = null;
   let pmremTexture: THREE.Texture | null = null;
+  let maxAniso = 1;
+
+  const isModuleEnabled = (cfg: ResumeSiteConfig, id: ResumeModuleId): boolean =>
+    cfg.modules.some((m) => m.id === id && m.enabled);
+
+  const rebuildResumeModules = (cfg: ResumeSiteConfig) => {
+    if (!textures) return;
+
+    // Dispose and replace dynamic resume groups cleanly
+    if (projectsZone) {
+      scene.remove(projectsZone.group);
+      projectsZone.dispose();
+      disposeObjectTree(projectsZone.group);
+    }
+    if (careerZone) {
+      scene.remove(careerZone.group);
+      careerZone.dispose();
+      disposeObjectTree(careerZone.group);
+    }
+    if (labZone) {
+      scene.remove(labZone.group);
+      labZone.dispose();
+      disposeObjectTree(labZone.group);
+    }
+    if (educationZone) {
+      scene.remove(educationZone.group);
+      educationZone.dispose();
+      disposeObjectTree(educationZone.group);
+    }
+    if (contactZone) {
+      scene.remove(contactZone.group);
+      contactZone.dispose();
+      disposeObjectTree(contactZone.group);
+    }
+    if (propsZone) {
+      scene.remove(propsZone.group);
+      propsZone.dispose();
+      disposeObjectTree(propsZone.group);
+    }
+
+    projectsZone = createProjectsZone(textures, cfg.projects, maxAniso);
+    projectsZone.group.visible = isModuleEnabled(cfg, 'projects');
+
+    careerZone = createCareerZone(cfg.careers, maxAniso);
+    careerZone.group.visible = isModuleEnabled(cfg, 'career');
+
+    labZone = createLabZone(cfg.techLayers, maxAniso);
+    labZone.group.visible = isModuleEnabled(cfg, 'ai_lab');
+
+    educationZone = createAltarAndWaterfall(textures, cfg.education, maxAniso);
+    educationZone.group.visible = isModuleEnabled(cfg, 'education');
+
+    contactZone = createContactImpactZone(cfg.impactMetrics, cfg.profile, maxAniso);
+    contactZone.group.visible = isModuleEnabled(cfg, 'contact');
+
+    propsZone = createPlaygroundProps(textures, cfg, maxAniso);
+
+    scene.add(
+      projectsZone.group,
+      careerZone.group,
+      labZone.group,
+      educationZone.group,
+      contactZone.group,
+      propsZone.group
+    );
+  };
 
   const yieldStage = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -186,87 +232,64 @@ export function mountWorldScene(
       else window.setTimeout(resolve, ms);
     });
 
-  // Progressive initialization so laptops show smooth stage-by-stage progress
   const initWorld = async () => {
-    callbacks.onProgress(12, '初始化渲染器与工作室环境光 (PMREM)...');
+    callbacks.onProgress(15, '初始化渲染器与工作室环境光...');
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
     pmremTexture = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environment = pmremTexture;
     pmremGenerator.dispose();
-    atmosphere = createSkyAtmosphere(scene, isSoftwareGl, 'sunset');
-    await yieldStage(45);
+    atmosphere = createSkyAtmosphere(scene, isSoftwareGl, currentConfig.display.atmosphere);
+    await yieldStage(40);
     if (disposed) return;
 
-    callbacks.onProgress(30, '程序化绘制地面、木纹、灯笼与展板贴图...');
-    const maxAniso = isSoftwareGl ? 1 : Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    callbacks.onProgress(35, '程序化生成地形、木纹、石灯笼与中文展板贴图...');
+    maxAniso = isSoftwareGl ? 1 : Math.min(8, renderer.capabilities.getMaxAnisotropy());
     textures = createProceduralTexturePack(maxAniso);
-    await yieldStage(45);
+    await yieldStage(40);
     if (disposed) return;
 
-    callbacks.onProgress(52, '构建连绵地形、宝石蓝溪流与木桥栈道...');
+    callbacks.onProgress(58, '构建河谷地形、跨河木桥与沿途石灯笼...');
     terrainWater = createTerrainAndWater(textures);
     scene.add(terrainWater.group);
     scene.add(createWoodenBridge(textures));
-    await yieldStage(45);
-    if (disposed) return;
 
-    callbacks.onProgress(70, '组装 12+ 部件红黑越野卡车与沿途石灯笼...');
-    truck = createOffroadTruck(textures);
-    truck.update(vehicleState, 0);
-    scene.add(truck.root);
-
-    // Scatter scenic Stone Lanterns along paths
     const lanternCoords: Array<[number, number, boolean]> = [
       [8.5, -1.5, false],
       [18, -9, true],
       [15, 16, false],
       [-14, -12, true],
       [-21, 9, false],
-      [-4, -22, true],
       [7, 25, false],
       [-10, 26, true],
     ];
     for (const [lx, lz, hasLight] of lanternCoords) {
       scene.add(createStoneLantern(textures, lx, lz, 0.95, hasLight && !isSoftwareGl));
     }
-    await yieldStage(45);
+    await yieldStage(40);
     if (disposed) return;
 
-    callbacks.onProgress(88, '搭建作品展区、实验工坊、赛道、保龄球与瀑布祭坛...');
-    projectsZone = createProjectsZone(textures, maxAniso);
-    labZone = createLabZone();
-    circuitZone = createCircuitZone(textures);
-    bowlingZone = createBowlingZone(textures);
-    altarZone = createAltarAndWaterfall(textures);
-    propsZone = createPlaygroundProps(textures, maxAniso, INITIAL_WHISPERS);
-
-    scene.add(
-      projectsZone.group,
-      labZone.group,
-      createCareerZone(maxAniso),
-      circuitZone.group,
-      bowlingZone.group,
-      altarZone.group,
-      propsZone.group
-    );
-    await yieldStage(45);
+    callbacks.onProgress(80, '装配红黑越野卡车与简历各 3D 展区...');
+    truck = createOffroadTruck(textures);
+    truck.update(vehicleState, 0);
+    scene.add(truck.root);
+    rebuildResumeModules(currentConfig);
+    await yieldStage(40);
     if (disposed) return;
 
-    callbacks.onProgress(100, '编译着色器并启动 3D 世界...');
+    callbacks.onProgress(100, '启动 3D 简历交互世界...');
     if (!isSoftwareGl) {
       renderer.compile(scene, camera);
     }
-    await yieldStage(35);
+    await yieldStage(30);
     if (disposed) return;
 
     callbacks.onReady();
     startLoop();
   };
 
-  // Keyboard Listeners (WASD + Arrows + Space + Shift + R + Enter + H)
   const onKeyDown = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement | null)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
     switch (e.code) {
       case 'KeyW':
@@ -303,7 +326,10 @@ export function mountWorldScene(
         honk();
         break;
       case 'Enter': {
-        const nearest = findNearestZone(vehicleState.x, vehicleState.z);
+        const enabledSet = new Set(
+          currentConfig.modules.filter((m) => m.enabled).map((m) => m.id)
+        );
+        const nearest = findNearestZone(vehicleState.x, vehicleState.z, enabledSet);
         if (nearest.inside) {
           callbacks.onZoneInteract(nearest.zone.id);
         }
@@ -347,7 +373,6 @@ export function mountWorldScene(
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
 
-  // Resize handler
   const onResize = () => {
     const w = container.clientWidth || window.innerWidth;
     const h = container.clientHeight || window.innerHeight;
@@ -357,7 +382,6 @@ export function mountWorldScene(
   };
   window.addEventListener('resize', onResize);
 
-  // Software-WebGL fenced loop pacing
   function afterDraw(cb: () => void) {
     const gl = renderer.getContext() as WebGL2RenderingContext;
     const sync = gl.fenceSync ? gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0) : null;
@@ -393,104 +417,33 @@ export function mountWorldScene(
     lastTime = now;
     elapsedTotal += dt;
 
-    // Combine keyboard & touch inputs
-    const mergedInput: VehicleInput = {
-      forward: keyInput.forward || touchInput.forward,
-      backward: keyInput.backward || touchInput.backward,
-      left: keyInput.left || touchInput.left,
-      right: keyInput.right || touchInput.right,
-      boost: keyInput.boost || touchInput.boost,
-      brake: keyInput.brake || touchInput.brake,
-      jump: keyInput.jump || touchInput.jump,
-    };
-
+    const enableRamps = currentConfig.display.enableStuntProps;
     const prevX = vehicleState.x;
     const prevZ = vehicleState.z;
-    vehicleState = stepVehiclePhysics(vehicleState, mergedInput, dt);
-    // One-shot jump key consumption prevents continuous hopping if held
-    touchInput.jump = false;
+    vehicleState = stepVehiclePhysics(vehicleState, keyInput, dt, 56, enableRamps);
 
     if (truck) truck.update(vehicleState, elapsedTotal);
     if (terrainWater) terrainWater.update(elapsedTotal);
-    if (projectsZone) projectsZone.update(elapsedTotal);
-    if (labZone) labZone.update(elapsedTotal);
-    if (altarZone) altarZone.update(elapsedTotal);
+    if (projectsZone && projectsZone.group.visible) projectsZone.update(elapsedTotal);
+    if (labZone && labZone.group.visible) labZone.update(elapsedTotal);
+    if (educationZone && educationZone.group.visible) educationZone.update(elapsedTotal);
+    if (contactZone && contactZone.group.visible) contactZone.update(elapsedTotal);
     if (atmosphere) atmosphere.updateSunFollow(vehicleState.x, vehicleState.z);
-
-    // Collisions & Dynamic World Systems
-    let pinsKnocked = 0;
-    if (bowlingZone) {
-      resolveDynamicBodyCollision(
-        bowlingZone.ball,
-        vehicleState.x,
-        vehicleState.z,
-        vehicleState.vx,
-        vehicleState.vz,
-        1.75
-      );
-      for (const pin of bowlingZone.pins) {
-        resolveDynamicBodyCollision(
-          pin,
-          vehicleState.x,
-          vehicleState.z,
-          vehicleState.vx,
-          vehicleState.vz,
-          1.6
-        );
-      }
-      pinsKnocked = bowlingZone.update(dt);
-      if (pinsKnocked >= 10) achievements.add('strike');
-      else if (pinsKnocked >= 1) achievements.add('first_pin');
-    }
-
-    if (circuitZone) {
-      for (const cone of circuitZone.cones) {
-        resolveDynamicBodyCollision(
-          cone,
-          vehicleState.x,
-          vehicleState.z,
-          vehicleState.vx,
-          vehicleState.vz,
-          1.55
-        );
-      }
-      circuitZone.update(dt, elapsedTotal, vehicleState.x, vehicleState.z);
-    }
 
     if (propsZone) {
       for (const crate of propsZone.crates) {
-        if (
-          resolveDynamicBodyCollision(
-            crate,
-            vehicleState.x,
-            vehicleState.z,
-            vehicleState.vx,
-            vehicleState.vz,
-            1.65
-          )
-        ) {
-          achievements.add('wrecker');
-        }
+        resolveDynamicBodyCollision(
+          crate,
+          vehicleState.x,
+          vehicleState.z,
+          vehicleState.vx,
+          vehicleState.vz,
+          1.65
+        );
       }
-      const gained = propsZone.update(dt, elapsedTotal, vehicleState.x, vehicleState.z);
-      if (gained > 0) {
-        cookiesCollected += gained;
-        achievements.add('cookie_hunter');
-      }
+      propsZone.update(dt);
     }
 
-    // Circuit lap timing
-    const circuitStep = updateCircuitProgress(circuitState, vehicleState.x, vehicleState.z, dt * 1000);
-    circuitState = circuitStep.state;
-    if (circuitStep.event === 'lap_finished') {
-      achievements.add('speed_racer');
-    }
-
-    // Achievements checks
-    if (vehicleState.distanceDriven > 45) achievements.add('road_trip');
-    if (vehicleState.jumpsCount > 0 && vehicleState.y > 1.8) achievements.add('sky_jumper');
-
-    // Follow camera smoothly tracks vehicle translation while preserving user OrbitControls rotation/zoom!
     if (cameraMode === 'follow') {
       _prevTarget.copy(controls.target);
       _desiredTarget.set(vehicleState.x, vehicleState.y + 1.15, vehicleState.z);
@@ -499,7 +452,6 @@ export function mountWorldScene(
       _delta.copy(controls.target).sub(_prevTarget);
       camera.position.add(_delta);
     } else {
-      // Even in free mode, allow smooth follow if vehicle actually moves
       const movedX = vehicleState.x - prevX;
       const movedZ = vehicleState.z - prevZ;
       if (Math.abs(movedX) > 0.001 || Math.abs(movedZ) > 0.001) {
@@ -513,29 +465,20 @@ export function mountWorldScene(
     controls.update();
     renderer.render(scene, camera);
 
-    // Throttle HUD React updates to <= 10 Hz
     if (now - lastHudEmit > 110) {
       lastHudEmit = now;
-      const nearest = findNearestZone(vehicleState.x, vehicleState.z);
-      if (nearest.inside) {
-        visitedZones.add(nearest.zone.id);
-        if (visitedZones.size >= WORLD_ZONES.length) {
-          achievements.add('world_explorer');
-        }
-      }
+      const enabledSet = new Set(
+        currentConfig.modules.filter((m) => m.enabled).map((m) => m.id)
+      );
+      const nearest = findNearestZone(vehicleState.x, vehicleState.z, enabledSet);
       callbacks.onHudUpdate({
         speedKmh: Math.round(Math.abs(vehicleState.speed) * 4.2),
         distanceMeters: Math.round(vehicleState.distanceDriven),
-        cookiesCollected,
-        totalCookies: propsZone ? propsZone.collectibleCookies.length : 8,
-        pinsKnocked,
         nearestZone: nearest.zone,
         insideZone: nearest.inside,
         truckX: vehicleState.x,
         truckZ: vehicleState.z,
         truckHeading: vehicleState.heading,
-        circuit: circuitState,
-        unlockedAchievements: Array.from(achievements),
       });
     }
 
@@ -556,24 +499,12 @@ export function mountWorldScene(
     }
   }
 
-  // Public control API
-  const teleportToZone = (zoneId: WorldZoneDef['id']) => {
+  const teleportToZone = (zoneId: ResumeModuleId) => {
     const zDef = WORLD_ZONES.find((z) => z.id === zoneId);
     if (!zDef) return;
-    let spawnX = zDef.x;
-    let spawnZ = zDef.z;
-    if (zoneId === 'landing') spawnZ += 1.5;
-    if (zoneId === 'projects') {
-      spawnX -= 2.2;
-      spawnZ += 4.2;
-    } else if (zoneId === 'lab') {
-      spawnX -= 3.8;
-      spawnZ += 3.8;
-    } else if (zoneId === 'altar') {
-      spawnX += 3.2;
-      spawnZ -= 4.2;
-    }
-    const spawnY = groundHeightAt(spawnX, spawnZ);
+    const spawnX = zDef.x + zDef.spawnOffset[0];
+    const spawnZ = zDef.z + zDef.spawnOffset[1];
+    const spawnY = groundHeightAt(spawnX, spawnZ, currentConfig.display.enableStuntProps);
 
     vehicleState = {
       ...vehicleState,
@@ -588,7 +519,7 @@ export function mountWorldScene(
       grounded: true,
     };
 
-    controls.target.set(spawnX, spawnY + 1.15, spawnZ);
+    controls.target.set(zDef.x, groundHeightAt(zDef.x, zDef.z) + 1.35, zDef.z);
     camera.position.set(
       spawnX + zDef.cameraOffset[0],
       spawnY + zDef.cameraOffset[1],
@@ -596,6 +527,7 @@ export function mountWorldScene(
     );
     controls.update();
     if (truck) truck.update(vehicleState, elapsedTotal);
+    renderer.render(scene, camera);
   };
 
   const respawnTruck = () => {
@@ -605,35 +537,29 @@ export function mountWorldScene(
       distanceDriven: vehicleState.distanceDriven,
       jumpsCount: vehicleState.jumpsCount,
     };
-    controls.target.set(fresh.x, fresh.y + 1.15, fresh.z);
+    controls.target.set(0, 1.1, 2.5);
     camera.position.set(11, 7.8, 15.5);
     controls.update();
+    if (truck) truck.update(vehicleState, elapsedTotal);
+    renderer.render(scene, camera);
   };
 
   const resetProps = () => {
-    bowlingZone?.resetPins();
-    circuitZone?.resetCones();
     propsZone?.resetCrates();
   };
 
-  const plantWhisper = (author: string, message: string) => {
-    if (!propsZone) return;
-    const palette = ['#d43545', '#7c3aed', '#0284c7', '#d97706', '#059669'];
-    const color = palette[Math.floor(Math.random() * palette.length)];
-    propsZone.addWhisperFlag({
-      id: `w-${Date.now()}`,
-      author: author.trim() || 'Explorer',
-      message: message.trim(),
-      x: vehicleState.x + Math.cos(vehicleState.heading) * 2.2,
-      z: vehicleState.z - Math.sin(vehicleState.heading) * 2.2,
-      color,
-    });
-    achievements.add('whisperer');
+  const applyConfig = (nextConfig: ResumeSiteConfig) => {
+    currentConfig = nextConfig;
+    atmosphere?.applyPreset(nextConfig.display.atmosphere, scene);
+    rebuildResumeModules(nextConfig);
+    renderer.render(scene, camera);
   };
 
   const honk = () => {
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
       const now = ctx.currentTime;
@@ -667,10 +593,7 @@ export function mountWorldScene(
     teleportToZone,
     respawnTruck,
     resetProps,
-    plantWhisper,
-    setTouchInput: (patch) => {
-      Object.assign(touchInput, patch);
-    },
+    applyConfig,
     honk,
     dispose: () => {
       disposed = true;
@@ -681,16 +604,15 @@ export function mountWorldScene(
       window.removeEventListener('resize', onResize);
       controls.dispose();
       textures?.dispose();
+      projectsZone?.dispose();
+      careerZone?.dispose();
+      labZone?.dispose();
+      educationZone?.dispose();
+      contactZone?.dispose();
+      propsZone?.dispose();
       atmosphere?.dispose();
       pmremTexture?.dispose();
-      scene.traverse((obj) => {
-        if ((obj as THREE.Mesh).isMesh) {
-          const mesh = obj as THREE.Mesh;
-          mesh.geometry?.dispose();
-          if (Array.isArray(mesh.material)) mesh.material.forEach((m) => m.dispose());
-          else mesh.material?.dispose();
-        }
-      });
+      disposeObjectTree(scene);
       renderer.dispose();
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);

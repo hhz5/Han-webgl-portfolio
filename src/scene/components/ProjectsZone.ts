@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ProjectExperienceItem } from '../../data/resumeConfig';
 import {
   createProjectScreenTexture,
   type ProceduralTexturePack,
@@ -8,52 +9,16 @@ import { groundHeightAt } from '../worldLogic';
 export interface ProjectsZoneComponent {
   group: THREE.Group;
   update: (elapsed: number) => void;
+  dispose: () => void;
 }
 
-export const PORTFOLIO_PROJECTS = [
-  {
-    title: 'Three.js Journey',
-    category: 'Course · 90+ Hours',
-    accent: '#fbbf24',
-    subtitle: 'WebGL & TSL Masterclass',
-    description:
-      '系统化的 Three.js 与 WebGPU / TSL 着色器实战课程，涵盖物理引擎、Blender 烘焙、粒子系统与后处理管线。',
-    stats: '45,000+ 学员 · 65 节高清课程',
-  },
-  {
-    title: 'Folio 2025 WebGPU',
-    category: 'Interactive World',
-    accent: '#fb7185',
-    subtitle: 'Open-World Portfolio',
-    description:
-      '基于 Three.js Shading Language (TSL) 与 Rapier 物理引擎打造的开放世界作品集，支持探索、赛车与多人微语旗帜。',
-    stats: 'WebGPU + WebGL2 · 38 项成就',
-  },
-  {
-    title: 'Terrain & Water Lab',
-    category: 'Procedural Shaders',
-    accent: '#38bdf8',
-    subtitle: 'Real-Time Stylized Nature',
-    description:
-      '全程序化草地实例化、海岸线波纹泡沫、大气散射雾效与动态昼夜光照系统，专为轻量化浏览器流畅运行优化。',
-    stats: '0 外部资源 · 60 FPS 流畅渲染',
-  },
-  {
-    title: 'Orongo & Madbox',
-    category: 'Creative Direction',
-    accent: '#a855f7',
-    subtitle: 'WebGL Studio Experiments',
-    description:
-      '为创意机构与独立游戏打造的互动式品牌体验，融合触觉物理反馈、动态音频合成与低多边形美术风格。',
-    stats: 'FWA & Awwwards SOTD',
-  },
-];
-
 /**
- * Independent component: Projects Showcase Plaza + "Fix the WiFi" rotating satellite/antenna monument.
+ * Independent component: AI Projects Showcase Plaza + Enterprise MaaS Core Beacon.
+ * Dynamically renders featured projects from ResumeSiteConfig.
  */
 export function createProjectsZone(
   textures: ProceduralTexturePack,
+  projects: ProjectExperienceItem[],
   maxAniso: number
 ): ProjectsZoneComponent {
   const group = new THREE.Group();
@@ -62,6 +27,8 @@ export function createProjectsZone(
   const cz = -14;
   const baseY = groundHeightAt(cx, cz);
   group.position.set(cx, baseY, cz);
+
+  const createdTextures: THREE.Texture[] = [];
 
   const frameMat = new THREE.MeshStandardMaterial({
     color: 0x332b47,
@@ -75,116 +42,120 @@ export function createProjectsZone(
     metalness: 0.1,
   });
 
-  // Plaza stone dais
-  const dais = new THREE.Mesh(new THREE.CylinderGeometry(7.2, 7.6, 0.22, 8), frameMat);
-  dais.position.y = 0.08;
+  // Plaza octagonal dais
+  const dais = new THREE.Mesh(new THREE.CylinderGeometry(8.2, 8.6, 0.24, 8), frameMat);
+  dais.position.y = 0.1;
   dais.receiveShadow = true;
   group.add(dais);
 
-  // Centerpiece "Fix the WiFi" Antenna Monument
-  const wifiBase = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.35, 0.7, 6), trimMat);
-  wifiBase.position.y = 0.5;
-  wifiBase.castShadow = true;
-  group.add(wifiBase);
+  // Centerpiece "Enterprise MaaS & AIGC Core" Monument positioned cleanly forward so billboards behind stay unobstructed
+  const coreGroup = new THREE.Group();
+  coreGroup.position.set(-2.8, 0, 3.2);
+  group.add(coreGroup);
 
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 3.2, 8), frameMat);
-  mast.position.y = 2.2;
+  const coreBase = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.2, 0.55, 6), trimMat);
+  coreBase.position.y = 0.42;
+  coreBase.castShadow = true;
+  coreGroup.add(coreBase);
+
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.19, 1.75, 8), frameMat);
+  mast.position.y = 1.45;
   mast.castShadow = true;
-  group.add(mast);
+  coreGroup.add(mast);
 
   const dishPivot = new THREE.Group();
-  dishPivot.position.y = 3.7;
-  group.add(dishPivot);
+  dishPivot.position.y = 2.5;
+  coreGroup.add(dishPivot);
 
-  const dish = new THREE.Mesh(
-    new THREE.SphereGeometry(1.05, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.45),
+  const ringHalo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.78, 0.07, 10, 28),
     new THREE.MeshStandardMaterial({
-      color: 0xf4a071,
-      roughness: 0.35,
-      metalness: 0.4,
-      side: THREE.DoubleSide,
+      color: 0xfbbf24,
+      emissive: new THREE.Color(0xf59e0b),
+      emissiveIntensity: 0.8,
+      metalness: 0.65,
+      roughness: 0.25,
     })
   );
-  dish.rotation.x = Math.PI * 0.72;
-  dish.castShadow = true;
-  dishPivot.add(dish);
+  ringHalo.rotation.x = Math.PI * 0.35;
+  dishPivot.add(ringHalo);
 
   const beacon = new THREE.Mesh(
-    new THREE.SphereGeometry(0.2, 12, 12),
+    new THREE.OctahedronGeometry(0.38, 0),
     new THREE.MeshStandardMaterial({
       color: 0xfb7185,
       emissive: new THREE.Color(0xf43f5e),
-      emissiveIntensity: 2.4,
+      emissiveIntensity: 2.2,
+      roughness: 0.2,
     })
   );
-  beacon.position.set(0, 0.35, 0.45);
   dishPivot.add(beacon);
 
-  // 4 Sculpted Project Billboard Kiosks arranged along the north arc facing the plaza approach (+Z/+X)
-  const kioskAngles = [-Math.PI * 0.85, -Math.PI * 0.62, -Math.PI * 0.38, -Math.PI * 0.15];
-  PORTFOLIO_PROJECTS.forEach((proj, idx) => {
-    const angle = kioskAngles[idx];
-    const dist = 5.4;
+  // Project Billboards arranged along a wide northern arc facing the plaza approach (+Z)
+  const featured = projects.filter((p) => p.featuredIn3D).slice(0, 6);
+  const count = Math.max(1, featured.length);
+  featured.forEach((proj, idx) => {
+    const t = count === 1 ? 0.5 : idx / (count - 1);
+    const angle = -Math.PI * 0.9 + t * Math.PI * 0.8;
+    const dist = 6.7;
     const kx = Math.cos(angle) * dist;
     const kz = Math.sin(angle) * dist;
 
     const kiosk = new THREE.Group();
-    kiosk.position.set(kx, 0.18, kz);
-    kiosk.lookAt(0, 0.18, 4.5);
+    kiosk.position.set(kx, 0.22, kz);
+    kiosk.lookAt(1.5, 0.22, 8.5);
 
-    // Dual support legs
-    for (const lx of [-1.25, 1.25]) {
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.2, 0.24), frameMat);
-      leg.position.set(lx, 1.1, 0);
+    for (const lx of [-1.2, 1.2]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 2.35, 0.22), frameMat);
+      leg.position.set(lx, 1.15, 0);
       leg.castShadow = true;
       kiosk.add(leg);
     }
 
-    // Billboard casing
-    const casing = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.1, 0.24), frameMat);
-    casing.position.set(0, 2.25, 0);
+    const casing = new THREE.Mesh(new THREE.BoxGeometry(3.15, 2.05, 0.22), frameMat);
+    casing.position.set(0, 2.38, 0);
     casing.castShadow = true;
     kiosk.add(casing);
 
-    // Procedural screen canvas
     const screenTex = createProjectScreenTexture(
       proj.title,
       proj.category,
-      proj.accent,
+      proj.accentHex,
       proj.subtitle,
+      proj.stats,
       maxAniso
     );
+    createdTextures.push(screenTex);
+
     const screen = new THREE.Mesh(
-      new THREE.PlaneGeometry(2.94, 1.84),
+      new THREE.PlaneGeometry(2.92, 1.82),
       new THREE.MeshStandardMaterial({
         map: screenTex,
         emissiveMap: screenTex,
         emissive: new THREE.Color(0xffffff),
-        emissiveIntensity: 0.45,
-        roughness: 0.25,
+        emissiveIntensity: 0.42,
+        roughness: 0.28,
       })
     );
-    screen.position.set(0, 2.25, 0.13);
+    screen.position.set(0, 2.38, 0.12);
     kiosk.add(screen);
 
-    // Glowing foot pad in front of kiosk
     const pad = new THREE.Mesh(
-      new THREE.RingGeometry(0.45, 0.65, 20),
+      new THREE.RingGeometry(0.42, 0.62, 20),
       new THREE.MeshBasicMaterial({
-        color: proj.accent,
+        color: proj.accentHex,
         side: THREE.DoubleSide,
       })
     );
     pad.rotation.x = -Math.PI / 2;
-    pad.position.set(0, 0.04, 1.2);
+    pad.position.set(0, 0.04, 1.15);
     kiosk.add(pad);
 
     group.add(kiosk);
   });
 
-  // Subtle decorative ground ring using wood texture accent
   const ring = new THREE.Mesh(
-    new THREE.RingGeometry(6.8, 7.1, 32),
+    new THREE.RingGeometry(7.7, 8.0, 32),
     new THREE.MeshBasicMaterial({
       color: 0xfb7185,
       transparent: true,
@@ -193,16 +164,20 @@ export function createProjectsZone(
     })
   );
   ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.21;
+  ring.position.y = 0.23;
   group.add(ring);
 
-  // Keep reference to textures used for consistency
   void textures;
 
   const update = (elapsed: number) => {
     dishPivot.rotation.y = elapsed * 0.75;
-    beacon.scale.setScalar(1 + Math.sin(elapsed * 4.5) * 0.14);
+    ringHalo.rotation.z = elapsed * 0.5;
+    beacon.scale.setScalar(1 + Math.sin(elapsed * 4.0) * 0.12);
   };
 
-  return { group, update };
+  const dispose = () => {
+    for (const t of createdTextures) t.dispose();
+  };
+
+  return { group, update, dispose };
 }

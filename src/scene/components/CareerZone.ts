@@ -1,40 +1,29 @@
 import * as THREE from 'three';
+import type { CareerMilestoneItem } from '../../data/resumeConfig';
 import { createSignpostTexture } from '../materials/proceduralTextures';
 import { groundHeightAt } from '../worldLogic';
 
-export const CAREER_MILESTONES = [
-  {
-    year: '2014–2017',
-    role: 'Creative Lead · Agencies',
-    detail: '在巴黎创意数字机构主导多项 WebGL 与互动品牌项目开发，荣获多项 Awwwards & FWA 奖项。',
-  },
-  {
-    year: '2018–2020',
-    role: 'Independent Creative Dev',
-    detail: '转型独立创意开发者，发布首版经典橙色沙漠赛车作品集，在全球前端与 3D 社区引发轰动。',
-  },
-  {
-    year: '2021–2024',
-    role: 'Three.js Journey Founder',
-    detail: '创立全球最受欢迎的 Three.js 系统化在线课程，帮助数万名开发者掌握 WebGL 与着色器艺术。',
-  },
-  {
-    year: '2025–2026',
-    role: 'WebGPU & TSL Open World',
-    detail: '以全新 TSL 与 Rapier 物理架构重构个人数字游乐场，打造可自由驾驶、探索与社交的 3D 世界。',
-  },
-];
+export interface CareerZoneComponent {
+  group: THREE.Group;
+  dispose: () => void;
+}
 
 /**
- * Independent component: Career Timeline Avenue with 4 monumental arches & year plaques.
+ * Independent component: Career Timeline Avenue with monumental arches
+ * representing each company & role from ResumeSiteConfig.
  */
-export function createCareerZone(maxAniso: number): THREE.Group {
+export function createCareerZone(
+  careers: CareerMilestoneItem[],
+  maxAniso: number
+): CareerZoneComponent {
   const group = new THREE.Group();
   group.name = 'CareerZone';
   const cx = -26;
-  const cz = -18;
+  const cz = -25;
   group.position.set(cx, groundHeightAt(cx, cz), cz);
-  group.rotation.y = 0.35;
+  group.rotation.y = 0.22;
+
+  const createdTextures: THREE.Texture[] = [];
 
   const pillarMat = new THREE.MeshStandardMaterial({
     color: 0xd9805b,
@@ -48,58 +37,72 @@ export function createCareerZone(maxAniso: number): THREE.Group {
     metalness: 0.28,
   });
 
-  // Runway floor strip
-  const walkway = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.14, 17.5), trimMat);
-  walkway.position.set(0, 0.05, 0);
+  const count = Math.max(1, careers.length);
+  const spacing = 3.6;
+  const runwayLength = Math.max(12, count * spacing + 2.2);
+
+  const walkway = new THREE.Mesh(
+    new THREE.BoxGeometry(6.2, 0.14, runwayLength),
+    trimMat
+  );
+  walkway.position.set(0, 0.06, 0);
   walkway.receiveShadow = true;
   group.add(walkway);
 
-  // 4 Timeline Milestone Arches spaced along Z
-  CAREER_MILESTONES.forEach((m, idx) => {
-    const zOffset = -6.0 + idx * 4.0;
+  // Order arches so newest career (影谱科技) stands nearest the south entrance (+Z)
+  const ordered = [...careers].reverse();
+  ordered.forEach((m, idx) => {
+    const zOffset = -((count - 1) * spacing) / 2 + idx * spacing;
     const arch = new THREE.Group();
     arch.position.set(0, 0.1, zOffset);
 
-    // Left & right columns
-    for (const sx of [-2.4, 2.4]) {
-      const col = new THREE.Mesh(new THREE.BoxGeometry(0.58, 3.3, 0.58), pillarMat);
-      col.position.set(sx, 1.65, 0);
+    for (const sx of [-2.55, 2.55]) {
+      const col = new THREE.Mesh(new THREE.BoxGeometry(0.56, 3.35, 0.56), pillarMat);
+      col.position.set(sx, 1.67, 0);
       col.castShadow = true;
       arch.add(col);
 
       const cap = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.22, 0.74), trimMat);
-      cap.position.set(sx, 3.35, 0);
+      cap.position.set(sx, 3.4, 0);
       arch.add(cap);
     }
 
-    // Arch lintel beam
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(5.6, 0.55, 0.62), pillarMat);
-    beam.position.set(0, 3.65, 0);
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(5.9, 0.58, 0.62), pillarMat);
+    beam.position.set(0, 3.7, 0);
     beam.castShadow = true;
     arch.add(beam);
 
-    // Milestone plaque mounted on lintel
-    const signTex = createSignpostTexture(m.year, m.role, maxAniso);
+    const signTex = createSignpostTexture(
+      `${m.company}`,
+      `${m.period} · ${m.role}`,
+      maxAniso
+    );
+    createdTextures.push(signTex);
+
     const plaque = new THREE.Mesh(
-      new THREE.PlaneGeometry(3.4, 1.15),
+      new THREE.PlaneGeometry(4.1, 1.28),
       new THREE.MeshStandardMaterial({
         map: signTex,
         emissiveMap: signTex,
         emissive: new THREE.Color(0xffcfa0),
-        emissiveIntensity: 0.25,
+        emissiveIntensity: 0.28,
         roughness: 0.4,
       })
     );
-    plaque.position.set(0, 3.65, 0.33);
+    plaque.position.set(0, 3.7, 0.34);
     arch.add(plaque);
 
     const plaqueBack = plaque.clone();
     plaqueBack.rotation.y = Math.PI;
-    plaqueBack.position.z = -0.33;
+    plaqueBack.position.z = -0.34;
     arch.add(plaqueBack);
 
     group.add(arch);
   });
 
-  return group;
+  const dispose = () => {
+    for (const t of createdTextures) t.dispose();
+  };
+
+  return { group, dispose };
 }

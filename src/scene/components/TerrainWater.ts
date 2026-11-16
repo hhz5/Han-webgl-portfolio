@@ -230,9 +230,11 @@ export function createTerrainAndWater(textures: ProceduralTexturePack): TerrainW
     const gz = (gRand() - 0.5) * 98;
     const gy = groundHeightAt(gx, gz);
     if (gy < -0.15) continue;
-    // Keep roads, bridge, and zone centers tidy
+    // Keep roads, bridge, and zone plazas completely clear of grass blades
     if (Math.abs(gx) < 3.4 && Math.abs(gz) < 16) continue;
-    const nearZone = WORLD_ZONES.some((zDef) => Math.hypot(gx - zDef.x, gz - zDef.z) < 5.2);
+    const nearZone = WORLD_ZONES.some(
+      (zDef) => Math.hypot(gx - zDef.x, gz - zDef.z) < zDef.radius + 1.6
+    );
     if (nearZone) continue;
 
     dummy.position.set(gx, gy, gz);
@@ -255,24 +257,34 @@ export function createTerrainAndWater(textures: ProceduralTexturePack): TerrainW
 
   // 5. Stylized Multi-Part Trees around perimeter & riverbanks (Instanced trunks + crowns)
   const treePositions: Array<[number, number, number]> = [];
+  const isClearOfZonesAndCameras = (tx: number, tz: number) =>
+    !WORLD_ZONES.some((zDef) => {
+      const distCenter = Math.hypot(tx - zDef.x, tz - zDef.z);
+      const camX = zDef.x + zDef.spawnOffset[0] + zDef.cameraOffset[0];
+      const camZ = zDef.z + zDef.spawnOffset[1] + zDef.cameraOffset[2];
+      const distCam = Math.hypot(tx - camX, tz - camZ);
+      return distCenter < zDef.radius + 5.2 || distCam < 8.5;
+    });
+
   for (let i = 0; i < 42; i++) {
     const angle = (i / 42) * Math.PI * 2 + gRand() * 0.14;
-    const radius = 36 + gRand() * 18;
+    const radius = 38 + gRand() * 18;
     const tx = Math.cos(angle) * radius;
     const tz = Math.sin(angle) * radius;
     if (groundHeightAt(tx, tz) < -0.2) continue;
-    if (WORLD_ZONES.some((zDef) => Math.hypot(tx - zDef.x, tz - zDef.z) < 7.5)) continue;
+    if (!isClearOfZonesAndCameras(tx, tz)) continue;
     treePositions.push([tx, tz, 0.85 + gRand() * 0.55]);
   }
-  // A few decorative meadow trees near the riverbanks
+  // A few decorative meadow trees well clear of exhibit plazas & sightlines
   for (const [tx, tz, ts] of [
-    [-12, -14, 1.05],
-    [13, -5, 0.95],
-    [16, 12, 1.1],
-    [-18, 22, 1.0],
-    [8, -22, 0.9],
+    [-11, -18, 1.0],
+    [13, -6, 0.95],
+    [14, 15, 1.05],
+    [9, -24, 0.9],
   ] as Array<[number, number, number]>) {
-    if (groundHeightAt(tx, tz) >= -0.1) treePositions.push([tx, tz, ts]);
+    if (groundHeightAt(tx, tz) >= -0.1 && isClearOfZonesAndCameras(tx, tz)) {
+      treePositions.push([tx, tz, ts]);
+    }
   }
 
   const trunkGeo = new THREE.CylinderGeometry(0.24, 0.38, 2.2, 7);

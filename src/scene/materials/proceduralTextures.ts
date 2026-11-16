@@ -7,12 +7,12 @@ export interface ProceduralTexturePack {
   woodBump: THREE.CanvasTexture;
   lanternGlowMap: THREE.CanvasTexture;
   contactShadowMap: THREE.CanvasTexture;
-  checkeredMap: THREE.CanvasTexture;
   asphaltMap: THREE.CanvasTexture;
   runeCircleMap: THREE.CanvasTexture;
-  cookieMap: THREE.CanvasTexture;
   dispose: () => void;
 }
+
+const CJK_FONT_STACK = '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif';
 
 function makeCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const canvas = document.createElement('canvas');
@@ -20,6 +20,41 @@ function makeCanvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingCo
   canvas.height = h;
   const ctx = canvas.getContext('2d')!;
   return [canvas, ctx];
+}
+
+function drawWrappedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines = 2
+): number {
+  const chars = Array.from(text);
+  let line = '';
+  let linesDrawn = 0;
+
+  for (let i = 0; i < chars.length; i++) {
+    const testLine = line + chars[i];
+    if (ctx.measureText(testLine).width > maxWidth && line.length > 0) {
+      if (linesDrawn >= maxLines - 1) {
+        const trimmed = line.slice(0, Math.max(1, line.length - 1)) + '…';
+        ctx.fillText(trimmed, x, y + linesDrawn * lineHeight);
+        return linesDrawn + 1;
+      }
+      ctx.fillText(line, x, y + linesDrawn * lineHeight);
+      linesDrawn++;
+      line = chars[i];
+    } else {
+      line = testLine;
+    }
+  }
+  if (line) {
+    ctx.fillText(line, x, y + linesDrawn * lineHeight);
+    linesDrawn++;
+  }
+  return linesDrawn;
 }
 
 export function createProceduralTexturePack(maxAniso: number): ProceduralTexturePack {
@@ -42,7 +77,6 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
   gCtx.fillStyle = '#d97f5c';
   gCtx.fillRect(0, 0, 512, 512);
 
-  // Subtle organic stone/earth patches
   let seed = 1337;
   const rand = () => {
     seed = (seed * 16807) % 2147483647;
@@ -59,7 +93,6 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
     gCtx.ellipse(x, y, r, r * (0.65 + rand() * 0.5), rand() * Math.PI, 0, Math.PI * 2);
     gCtx.fill();
   }
-  // Subtle paving cracks
   gCtx.strokeStyle = 'rgba(110, 52, 48, 0.16)';
   gCtx.lineWidth = 2;
   for (let i = 0; i < 65; i++) {
@@ -72,7 +105,6 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
   }
   const groundMap = register(new THREE.CanvasTexture(gCanvas), true, 24);
 
-  // Ground micro-relief bump map (linear)
   const [gbCanvas, gbCtx] = makeCanvas(256, 256);
   gbCtx.fillStyle = '#808080';
   gbCtx.fillRect(0, 0, 256, 256);
@@ -83,7 +115,7 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
   }
   const groundBump = register(new THREE.CanvasTexture(gbCanvas), false, 24);
 
-  // 2. Warm wooden planks (Bridge, benches, crates, signposts)
+  // 2. Warm wooden planks
   const [wCanvas, wCtx] = makeCanvas(512, 512);
   wCtx.fillStyle = '#cc704b';
   wCtx.fillRect(0, 0, 512, 512);
@@ -94,10 +126,8 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
     const tint = (rand() - 0.5) * 20;
     wCtx.fillStyle = `rgb(${204 + tint}, ${112 + tint * 0.6}, ${76 + tint * 0.4})`;
     wCtx.fillRect(0, y0 + 2, 512, plankH - 4);
-    // Plank gap
     wCtx.fillStyle = '#5a2d24';
     wCtx.fillRect(0, y0, 512, 3);
-    // Wood grain lines
     wCtx.strokeStyle = 'rgba(92, 42, 30, 0.22)';
     wCtx.lineWidth = 1.5;
     for (let g = 0; g < 6; g++) {
@@ -107,7 +137,6 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
       wCtx.bezierCurveTo(170, gy + (rand() - 0.5) * 8, 340, gy + (rand() - 0.5) * 8, 512, gy);
       wCtx.stroke();
     }
-    // Nail heads
     wCtx.fillStyle = '#3b242c';
     for (const nx of [24, 488]) {
       wCtx.beginPath();
@@ -127,7 +156,7 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
   }
   const woodBump = register(new THREE.CanvasTexture(wbCanvas), false, 1);
 
-  // 3. Stone Lantern glowing diamond lattice texture (matches Bruno's lanterns!)
+  // 3. Stone Lantern glowing diamond lattice texture
   const [lCanvas, lCtx] = makeCanvas(256, 256);
   const grad = lCtx.createLinearGradient(0, 0, 0, 256);
   grad.addColorStop(0, '#fff4b8');
@@ -135,7 +164,6 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
   grad.addColorStop(1, '#ff7726');
   lCtx.fillStyle = grad;
   lCtx.fillRect(0, 0, 256, 256);
-
   lCtx.strokeStyle = '#3b2e4d';
   lCtx.lineWidth = 14;
   for (let i = -256; i <= 512; i += 64) {
@@ -161,29 +189,18 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
   sCtx.fillRect(0, 0, 256, 256);
   const contactShadowMap = register(new THREE.CanvasTexture(sCanvas), true, 1);
 
-  // 5. Checkered racing banner
-  const [cCanvas, cCtx] = makeCanvas(256, 128);
-  const sq = 32;
-  for (let y = 0; y < 128; y += sq) {
-    for (let x = 0; x < 256; x += sq) {
-      cCtx.fillStyle = ((x / sq + y / sq) % 2 === 0) ? '#fff6ed' : '#262033';
-      cCtx.fillRect(x, y, sq, sq);
-    }
-  }
-  const checkeredMap = register(new THREE.CanvasTexture(cCanvas), true, 2);
-
-  // 6. Warm asphalt road texture
+  // 5. Plaza dark slate paving texture
   const [aCanvas, aCtx] = makeCanvas(256, 256);
   aCtx.fillStyle = '#383047';
   aCtx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 1600; i++) {
-    const shade = 44 + Math.floor(rand() * 34);
+  for (let i = 0; i < 1400; i++) {
+    const shade = 44 + Math.floor(rand() * 30);
     aCtx.fillStyle = `rgb(${shade}, ${shade - 4}, ${shade + 12})`;
     aCtx.fillRect(rand() * 256, rand() * 256, 2, 2);
   }
   const asphaltMap = register(new THREE.CanvasTexture(aCanvas), true, 8);
 
-  // 7. Altar star rune circle texture
+  // 6. Sanctuary rune circle texture
   const [rCanvas, rCtx] = makeCanvas(512, 512);
   rCtx.clearRect(0, 0, 512, 512);
   rCtx.strokeStyle = '#c084fc';
@@ -195,7 +212,6 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
   rCtx.beginPath();
   rCtx.arc(256, 256, 184, 0, Math.PI * 2);
   rCtx.stroke();
-  // 5-pointed geometric rune star
   rCtx.beginPath();
   for (let i = 0; i <= 5; i++) {
     const angle = (i * 4 * Math.PI) / 5 - Math.PI / 2;
@@ -207,33 +223,6 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
   rCtx.stroke();
   const runeCircleMap = register(new THREE.CanvasTexture(rCanvas), true, 1);
 
-  // 8. Golden Cookie texture
-  const [ckCanvas, ckCtx] = makeCanvas(256, 256);
-  ckCtx.fillStyle = '#d99145';
-  ckCtx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 140; i++) {
-    ckCtx.fillStyle = rand() > 0.5 ? '#c47b35' : '#e6a55c';
-    ckCtx.beginPath();
-    ckCtx.arc(rand() * 256, rand() * 256, 3 + rand() * 8, 0, Math.PI * 2);
-    ckCtx.fill();
-  }
-  // Chocolate chips
-  ckCtx.fillStyle = '#3b211a';
-  const chips = [
-    [70, 75, 18],
-    [175, 65, 22],
-    [130, 128, 20],
-    [68, 175, 19],
-    [188, 168, 21],
-    [122, 196, 15],
-  ];
-  for (const [cx, cy, cr] of chips) {
-    ckCtx.beginPath();
-    ckCtx.arc(cx, cy, cr, 0, Math.PI * 2);
-    ckCtx.fill();
-  }
-  const cookieMap = register(new THREE.CanvasTexture(ckCanvas), true, 1);
-
   return {
     groundMap,
     groundBump,
@@ -241,10 +230,8 @@ export function createProceduralTexturePack(maxAniso: number): ProceduralTexture
     woodBump,
     lanternGlowMap,
     contactShadowMap,
-    checkeredMap,
     asphaltMap,
     runeCircleMap,
-    cookieMap,
     dispose: () => {
       for (const t of created) t.dispose();
     },
@@ -256,44 +243,53 @@ export function createProjectScreenTexture(
   category: string,
   accentHex: string,
   subtitle: string,
+  stats: string,
   maxAniso: number
 ): THREE.CanvasTexture {
   const [canvas, ctx] = makeCanvas(512, 320);
   const bg = ctx.createLinearGradient(0, 0, 512, 320);
-  bg.addColorStop(0, '#231c36');
-  bg.addColorStop(1, '#36274f');
+  bg.addColorStop(0, '#1f1832');
+  bg.addColorStop(1, '#31234a');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, 512, 320);
 
-  // Decorative geometric preview graphic
+  // Accent corner glow
   ctx.fillStyle = accentHex;
-  ctx.globalAlpha = 0.22;
+  ctx.globalAlpha = 0.16;
   ctx.beginPath();
-  ctx.arc(410, 110, 96, 0, Math.PI * 2);
+  ctx.arc(430, 88, 92, 0, Math.PI * 2);
   ctx.fill();
   ctx.globalAlpha = 1;
 
+  // Frame border + top accent bar
   ctx.strokeStyle = accentHex;
   ctx.lineWidth = 4;
-  ctx.strokeRect(20, 20, 472, 280);
-
+  ctx.strokeRect(16, 16, 480, 288);
   ctx.fillStyle = accentHex;
-  ctx.font = 'bold 20px sans-serif';
-  ctx.fillText(category.toUpperCase(), 42, 68);
+  ctx.fillRect(16, 16, 480, 10);
 
+  // Category tag
+  ctx.fillStyle = accentHex;
+  ctx.font = `bold 18px ${CJK_FONT_STACK}`;
+  ctx.fillText(category, 38, 62, 430);
+
+  // Title (wrapped cleanly across up to 2 lines)
   ctx.fillStyle = '#fff6ef';
-  ctx.font = 'bold 38px sans-serif';
-  ctx.fillText(title, 42, 132);
+  ctx.font = `bold 32px ${CJK_FONT_STACK}`;
+  const titleLines = drawWrappedText(ctx, title, 38, 108, 434, 40, 2);
 
-  ctx.fillStyle = '#d6c6e1';
-  ctx.font = '22px sans-serif';
-  ctx.fillText(subtitle, 42, 182);
+  // Subtitle
+  const subY = 108 + titleLines * 40 + 6;
+  ctx.fillStyle = '#d9cbe6';
+  ctx.font = `20px ${CJK_FONT_STACK}`;
+  drawWrappedText(ctx, subtitle, 38, subY, 434, 28, 2);
 
+  // Bottom stat pill
   ctx.fillStyle = accentHex;
-  ctx.fillRect(42, 224, 150, 42);
-  ctx.fillStyle = '#1b1528';
-  ctx.font = 'bold 18px sans-serif';
-  ctx.fillText('PRESS ENTER', 58, 251);
+  ctx.fillRect(38, 242, 434, 42);
+  ctx.fillStyle = '#1b1429';
+  ctx.font = `bold 17px ${CJK_FONT_STACK}`;
+  ctx.fillText(stats, 52, 269, 406);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -307,21 +303,101 @@ export function createSignpostTexture(
   sublabel: string,
   maxAniso: number
 ): THREE.CanvasTexture {
-  const [canvas, ctx] = makeCanvas(256, 96);
-  ctx.fillStyle = '#c46845';
-  ctx.fillRect(0, 0, 256, 96);
-  ctx.strokeStyle = '#4e2926';
+  const [canvas, ctx] = makeCanvas(384, 128);
+  ctx.fillStyle = '#2d2142';
+  ctx.fillRect(0, 0, 384, 128);
+  ctx.strokeStyle = '#f59e0b';
   ctx.lineWidth = 6;
-  ctx.strokeRect(3, 3, 250, 90);
+  ctx.strokeRect(4, 4, 376, 120);
 
-  ctx.fillStyle = '#fff5e6';
-  ctx.font = 'bold 24px sans-serif';
+  ctx.fillStyle = '#fff6ef';
+  ctx.font = `bold 28px ${CJK_FONT_STACK}`;
   ctx.textAlign = 'center';
-  ctx.fillText(label, 128, 44, 224);
+  ctx.fillText(label, 192, 54, 344);
 
-  ctx.fillStyle = '#ffd59e';
-  ctx.font = 'bold 15px sans-serif';
-  ctx.fillText(sublabel, 128, 72, 224);
+  ctx.fillStyle = '#fcd34d';
+  ctx.font = `bold 19px ${CJK_FONT_STACK}`;
+  ctx.fillText(sublabel, 192, 92, 344);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAniso;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+export function createWelcomeMonolithTexture(
+  name: string,
+  title: string,
+  experience: string,
+  availability: string,
+  contact: string,
+  maxAniso: number
+): THREE.CanvasTexture {
+  const [canvas, ctx] = makeCanvas(512, 256);
+  const bg = ctx.createLinearGradient(0, 0, 512, 256);
+  bg.addColorStop(0, '#211835');
+  bg.addColorStop(1, '#3a2752');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 512, 256);
+
+  ctx.strokeStyle = '#fbbf24';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(10, 10, 492, 236);
+
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillRect(10, 10, 492, 10);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#fff6ef';
+  ctx.font = `bold 44px ${CJK_FONT_STACK}`;
+  ctx.fillText(`${name} · ${title}`, 256, 86, 456);
+
+  ctx.fillStyle = '#fbd38d';
+  ctx.font = `bold 24px ${CJK_FONT_STACK}`;
+  ctx.fillText(`${experience} · ${availability}`, 256, 140, 456);
+
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = `bold 22px ${CJK_FONT_STACK}`;
+  ctx.fillText(contact, 256, 192, 456);
+
+  ctx.fillStyle = '#d6c6e1';
+  ctx.font = `16px ${CJK_FONT_STACK}`;
+  ctx.fillText('WASD 驾驶探索 · 鼠标拖动旋转 / 滚轮缩放', 256, 228, 456);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAniso;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+export function createMetricPillarTexture(
+  headline: string,
+  label: string,
+  detail: string,
+  accentHex: string,
+  maxAniso: number
+): THREE.CanvasTexture {
+  const [canvas, ctx] = makeCanvas(384, 256);
+  ctx.fillStyle = '#1f1632';
+  ctx.fillRect(0, 0, 384, 256);
+  ctx.strokeStyle = accentHex;
+  ctx.lineWidth = 6;
+  ctx.strokeRect(8, 8, 368, 240);
+
+  ctx.fillStyle = accentHex;
+  ctx.font = `bold 42px ${CJK_FONT_STACK}`;
+  ctx.textAlign = 'center';
+  ctx.fillText(headline, 192, 82, 340);
+
+  ctx.fillStyle = '#fff6ef';
+  ctx.font = `bold 24px ${CJK_FONT_STACK}`;
+  ctx.fillText(label, 192, 132, 340);
+
+  ctx.fillStyle = '#d4c3e2';
+  ctx.font = `18px ${CJK_FONT_STACK}`;
+  drawWrappedText(ctx, detail, 192, 174, 320, 26, 2);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
